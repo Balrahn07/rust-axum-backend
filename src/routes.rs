@@ -6,10 +6,14 @@ use crate::error::AppError;
 use axum::http::StatusCode;
 use axum::extract::rejection::JsonRejection;
 use tracing::{info, error}; // Logging macros
+use crate::jwt::{create_jwt, verify_jwt};
+use axum::extract::TypedHeader;
+use axum::response::IntoResponse; // ✅ Fixes `IntoResponse` error
+use headers::{Authorization, authorization::Bearer};
 
 pub fn create_routes(state: AppState) -> Router {
     Router::new()
-        .route("/", get(root))
+        .route("/login", post(login)) // ✅ New login route
         .route("/users", get(get_users).post(create_user))
         .with_state(state)
 }
@@ -18,21 +22,37 @@ async fn root() -> &'static str {
     "Hello, API!"
 }
 
+async fn login(Json(payload): Json<NewUser>) -> Result<Json<String>, AppError> {
+    let token = create_jwt(&payload.name).map_err(|_| {
+        AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token")
+    })?;
+
+    Ok(Json(token))
+}
+
+
 // Fetch all users from the database
-async fn get_users(State(state): State<AppState>) -> Result<Json<Vec<User>>, AppError> {
-    info!("📡 Received GET /users request");
+async fn get_users(
+    (TypedHeader(auth), State(state)): (TypedHeader<Authorization<Bearer>>, State<AppState>),
+) -> Result<Json<Vec<User>>, AppError> {
+    let token = auth.token();
+
+    let claims = verify_jwt(token).map_err(|_| {
+        AppError::new(StatusCode::UNAUTHORIZED, "Invalid or expired token")
+    })?;
+
+    info!("✅ Authenticated user: {}", claims.sub);
 
     let users = sqlx::query_as!(User, "SELECT id, name FROM users")
         .fetch_all(&state.db)
         .await
-        .map_err(|err| {
-            error!("❌ Database error in GET /users: {:?}", err);
-            AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch users")
-        })?;
+        .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch users"))?;
 
-    info!("✅ Successfully retrieved {} users", users.len());
     Ok(Json(users))
 }
+
+
+
 
 // Create a new user and insert into the database
 async fn create_user(

@@ -2,6 +2,8 @@ mod models;
 mod routes;
 mod state;
 mod error; // Include error handling module
+mod jwt; // Include JWT module
+
 
 use axum::Server;
 use dotenvy::dotenv;
