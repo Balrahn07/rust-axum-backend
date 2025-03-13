@@ -1,6 +1,7 @@
 mod models;
 mod routes;
 mod state;
+mod error;
 
 use axum::Server;
 use dotenvy::dotenv;
